@@ -1,0 +1,76 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Admin {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  events    Event[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Event {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  startDate   DateTime
+  endDate     DateTime
+  description String?
+  imageUrl    String?
+  
+  adminId     String
+  admin       Admin    @relation(fields: [adminId], references: [id])
+  
+  inventory   InventoryBlock[]
+  bookings    Booking[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model InventoryBlock {
+  id             String   @id @default(cuid())
+  hotelId        String
+  hotelName      String
+  roomTypeId     String
+  roomTypeName   String
+  totalAllocated Int
+  consumed       Int      @default(0)
+  price          Float    // Negotiated rate + markup
+  
+  eventId        String
+  event          Event    @relation(fields: [eventId], references: [id])
+  
+  bookings       Booking[]
+  
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Booking {
+  id             String   @id @default(cuid())
+  guestName      String
+  guestEmail     String
+  guestPhone     String?
+  checkIn        DateTime
+  checkOut       DateTime
+  totalPrice     Float
+  status         String   @default("CONFIRMED") // CONFIRMED, CANCELLED
+  
+  eventId        String
+  event          Event    @relation(fields: [eventId], references: [id])
+  
+  inventoryBlockId String
+  inventoryBlock   InventoryBlock @relation(fields: [inventoryBlockId], references: [id])
+  
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
