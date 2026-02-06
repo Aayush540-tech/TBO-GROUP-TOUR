@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import Link from "next/link"
 import { ChevronRight, Check, Search, Calendar, Hotel, DollarSign, ArrowRight } from "lucide-react"
+import { createEvent } from "@/app/actions"
 
 // Mock Data for Hotels
 const MOCK_HOTELS = [
@@ -223,6 +224,7 @@ export default function CreateEventWizard() {
                         </div>
                     </div>
                 )}
+
                 {step === 5 && (
                     <div className="space-y-6 animate-in zoom-in-95 duration-500 text-center py-10">
                         <div className="w-24 h-24 bg-green-500 text-white rounded-full flex items-center justify-center mx-auto shadow-lg shadow-green-500/20">
@@ -244,6 +246,7 @@ export default function CreateEventWizard() {
                         </div>
                     </div>
                 )}
+
             </div>
 
             {/* Navigation Buttons */}
@@ -258,9 +261,29 @@ export default function CreateEventWizard() {
                                 Next Step <ChevronRight className="ml-2 h-4 w-4" />
                             </Button>
                         ) : (
-                            <Button size="lg" className="px-8 bg-primary hover:bg-primary/90" onClick={() => setStep(5)}>
-                                Publish Microsite 🚀
-                            </Button>
+                            <form action={async () => {
+                                const data = new FormData()
+                                data.append('name', formData.eventName)
+                                data.append('slug', formData.eventSlug)
+                                data.append('startDate', formData.startDate)
+                                data.append('endDate', formData.endDate)
+                                data.append('hotelId', selectedHotel.id)
+                                data.append('hotelName', selectedHotel.name)
+
+                                // Format inventory for server
+                                const inventoryList = Object.keys(inventory).map(key => ({
+                                    id: key,
+                                    ...inventory[key]
+                                }))
+                                data.append('inventory', JSON.stringify(inventoryList))
+
+                                await createEvent(data) // Server Action
+                                setStep(5)
+                            }}>
+                                <Button size="lg" className="px-8 bg-primary hover:bg-primary/90" type="submit">
+                                    Publish Microsite 🚀
+                                </Button>
+                            </form>
                         )}
                     </>
                 )}
