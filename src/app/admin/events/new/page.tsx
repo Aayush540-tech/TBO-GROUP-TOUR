@@ -1,29 +1,21 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useFormStatus } from "react-dom"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Card, CardContent } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Textarea } from "@/components/ui/textarea"
+import { CalendarIcon, MapPin, Star, Plus, Trash2, Check, ExternalLink, Loader2, Search, ChevronRight, Hotel as HotelIcon, ArrowRight } from "lucide-react"
+import { format } from "date-fns"
+import { createEvent, getEvents } from "@/app/actions"
+import { searchHotelsAction, getHotelInventoryAction } from "@/app/actions/hotel"
 import Link from "next/link"
-import { ChevronRight, Check, Search, Calendar, Hotel, DollarSign, ArrowRight } from "lucide-react"
-import { createEvent } from "@/app/actions"
 
-// Mock Data for Hotels
-const MOCK_HOTELS = [
-    {
-        id: "h1", name: "Grand Hyatt Dubai", location: "Dubai, UAE", image: "https://images.unsplash.com/photo-1566073771259-6a8506099945?fit=crop&w=300&h=200", rooms: [
-            { id: "r1", name: "King Room", price: 200 },
-            { id: "r2", name: "Twin Room", price: 200 },
-            { id: "r3", name: "Suite", price: 450 }
-        ]
-    },
-    {
-        id: "h2", name: "Atlantis The Palm", location: "Palm Jumeirah", image: "https://images.unsplash.com/photo-1582719508461-905c673771fd?fit=crop&w=300&h=200", rooms: [
-            { id: "r4", name: "Ocean View", price: 350 },
-            { id: "r5", name: "Palm View", price: 380 }
-        ]
-    },
-]
+// Types
+import { type Hotel } from "@/lib/tbo-api"
 
 export default function CreateEventWizard() {
     const [step, setStep] = useState(1)
@@ -36,10 +28,16 @@ export default function CreateEventWizard() {
         endDate: "",
     })
 
-    const [selectedHotel, setSelectedHotel] = useState<any>(null)
+    // Hotel Search State
+    const [searchQuery, setSearchQuery] = useState("")
+    const [searchResults, setSearchResults] = useState<Hotel[]>([])
+    const [isSearching, setIsSearching] = useState(false)
+    const [selectedHotel, setSelectedHotel] = useState<Hotel | null>(null)
 
-    // Selection: { roomTypeId: { quantity, markup } }
+    // Selection: { roomTypeId: { quantity, markup, cost, name } }
     const [inventory, setInventory] = useState<Record<string, { quantity: number, markup: number, cost: number, name: string }>>({})
+    const [isLoadingInventory, setIsLoadingInventory] = useState(false)
+    const [availableRooms, setAvailableRooms] = useState<any[]>([])
 
     const handleNext = () => setStep(step + 1)
     const handleBack = () => setStep(step - 1)
@@ -47,6 +45,50 @@ export default function CreateEventWizard() {
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setFormData({ ...formData, [e.target.name]: e.target.value })
     }
+
+    // Live Search Handler
+    useEffect(() => {
+        const delayDebounceFn = setTimeout(async () => {
+            if (searchQuery.length >= 2) {
+                setIsSearching(true)
+                try {
+                    const results = await searchHotelsAction(searchQuery)
+                    setSearchResults(results)
+                } catch (error) {
+                    console.error("Search failed", error)
+                } finally {
+                    setIsSearching(false)
+                }
+            } else {
+                setSearchResults([])
+            }
+        }, 500)
+
+        return () => clearTimeout(delayDebounceFn)
+    }, [searchQuery])
+
+    // Load available rooms when moving to inventory step
+    useEffect(() => {
+        if (step === 3 && selectedHotel && formData.startDate && formData.endDate) {
+            const fetchInventory = async () => {
+                setIsLoadingInventory(true)
+                try {
+                    const rooms = await getHotelInventoryAction(
+                        selectedHotel.id,
+                        new Date(formData.startDate),
+                        new Date(formData.endDate)
+                    )
+                    setAvailableRooms(rooms)
+                } catch (error) {
+                    console.error("Failed to load inventory", error)
+                } finally {
+                    setIsLoadingInventory(false)
+                }
+            }
+            fetchInventory()
+        }
+    }, [step, selectedHotel, formData.startDate, formData.endDate])
+
 
     const handleInventoryChange = (roomId: string, field: string, value: string, cost: number, name: string) => {
         const existing = inventory[roomId] || { quantity: 0, markup: 0, cost, name }
@@ -112,26 +154,62 @@ export default function CreateEventWizard() {
                         <h2 className="text-2xl font-bold">Select Hotel Property</h2>
                         <div className="relative">
                             <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                            <Input placeholder="Search hotels in Dubai..." className="pl-10" />
-                        </div>
-                        <div className="grid md:grid-cols-2 gap-4 mt-4">
-                            {MOCK_HOTELS.map((hotel) => (
-                                <div
-                                    key={hotel.id}
-                                    className={`border rounded-lg overflow-hidden cursor-pointer transition-all hover:ring-2 hover:ring-primary ${selectedHotel?.id === hotel.id ? "ring-2 ring-primary bg-primary/5" : ""}`}
-                                    onClick={() => setSelectedHotel(hotel)}
-                                >
-                                    <div className="h-32 bg-gray-200 w-full relative">
-                                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                                        <img src={hotel.image} alt={hotel.name} className="w-full h-full object-cover" />
-                                    </div>
-                                    <div className="p-4">
-                                        <h3 className="font-bold">{hotel.name}</h3>
-                                        <p className="text-sm text-muted-foreground flex items-center gap-1"><Hotel className="h-3 w-3" /> {hotel.location}</p>
-                                    </div>
+                            <Input
+                                placeholder="Search hotels (e.g. Dubai, Taj)..."
+                                className="pl-10"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                            />
+                            {isSearching && (
+                                <div className="absolute right-3 top-2.5">
+                                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                                 </div>
-                            ))}
+                            )}
                         </div>
+
+                        <div className="grid md:grid-cols-2 gap-4 mt-4">
+                            {searchResults.length > 0 ? (
+                                searchResults.map((hotel) => (
+                                    <div
+                                        key={hotel.id}
+                                        className={`border rounded-lg overflow-hidden cursor-pointer transition-all hover:ring-2 hover:ring-primary ${selectedHotel?.id === hotel.id ? "ring-2 ring-primary bg-primary/5" : ""}`}
+                                        onClick={() => setSelectedHotel(hotel)}
+                                    >
+                                        <div className="h-32 bg-gray-200 w-full relative">
+                                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                                            <img src={hotel.imageUrl} alt={hotel.name} className="w-full h-full object-cover" />
+                                        </div>
+                                        <div className="p-4">
+                                            <div className="flex justify-between items-start">
+                                                <h3 className="font-bold">{hotel.name}</h3>
+                                                <div className="flex items-center text-yellow-500 text-xs">
+                                                    <Star className="h-3 w-3 fill-current" /> {hotel.rating}
+                                                </div>
+                                            </div>
+                                            <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1"><MapPin className="h-3 w-3" /> {hotel.location}</p>
+                                            <div className="flex gap-1 mt-2 flex-wrap">
+                                                {hotel.amenities.slice(0, 3).map((amenity, idx) => (
+                                                    <span key={idx} className="text-[10px] bg-muted px-1.5 py-0.5 rounded">{amenity}</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            ) : searchQuery.length > 2 && !isSearching ? (
+                                <div className="col-span-2 text-center py-8 text-muted-foreground">
+                                    No hotels found matching "{searchQuery}"
+                                </div>
+                            ) : (
+                                <div className="col-span-2 text-center py-8 text-muted-foreground">
+                                    Start typing to search TBO's hotel inventory...
+                                </div>
+                            )}
+                        </div>
+                        {selectedHotel && (
+                            <div className="bg-primary/10 text-primary p-3 rounded-md text-sm font-medium flex items-center gap-2">
+                                <Check className="h-4 w-4" /> Selected: {selectedHotel.name}
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -141,49 +219,62 @@ export default function CreateEventWizard() {
                         {selectedHotel ? (
                             <div className="space-y-6">
                                 <div className="flex items-center gap-4 bg-muted/20 p-4 rounded-lg">
-                                    <Hotel className="h-8 w-8 text-primary" />
+                                    <HotelIcon className="h-8 w-8 text-primary" />
                                     <div>
                                         <h3 className="font-bold">{selectedHotel.name}</h3>
-                                        <p className="text-sm text-muted-foreground">Define allocation and markup for each room type.</p>
+                                        <p className="text-sm text-muted-foreground">
+                                            Live rates for {formData.startDate} to {formData.endDate}
+                                        </p>
                                     </div>
                                 </div>
 
-                                <div className="space-y-4">
-                                    {selectedHotel.rooms.map((room: any) => (
-                                        <div key={room.id} className="grid grid-cols-12 gap-4 items-center border p-4 rounded-lg">
-                                            <div className="col-span-12 md:col-span-4">
-                                                <h4 className="font-semibold">{room.name}</h4>
-                                                <p className="text-sm text-muted-foreground">Net Rate: ${room.price}</p>
-                                            </div>
-                                            <div className="col-span-6 md:col-span-3">
-                                                <Label className="text-xs">Quantity to Lock</Label>
-                                                <Input
-                                                    type="number"
-                                                    min="0"
-                                                    className="h-8"
-                                                    placeholder="0"
-                                                    onChange={(e) => handleInventoryChange(room.id, "quantity", e.target.value, room.price, room.name)}
-                                                />
-                                            </div>
-                                            <div className="col-span-6 md:col-span-3">
-                                                <Label className="text-xs">Markup ($)</Label>
-                                                <Input
-                                                    type="number"
-                                                    min="0"
-                                                    className="h-8"
-                                                    placeholder="0"
-                                                    onChange={(e) => handleInventoryChange(room.id, "markup", e.target.value, room.price, room.name)}
-                                                />
-                                            </div>
-                                            <div className="col-span-12 md:col-span-2 text-right">
-                                                <div className="text-xs text-muted-foreground">Guest Price</div>
-                                                <div className="font-bold text-lg text-primary">
-                                                    ${((inventory[room.id]?.markup || 0) + room.price)}
+                                {isLoadingInventory ? (
+                                    <div className="py-12 flex flex-col items-center justify-center text-muted-foreground">
+                                        <Loader2 className="h-8 w-8 animate-spin mb-2" />
+                                        <p>Fetching real-time availability...</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        {availableRooms.map((room: any) => (
+                                            <div key={room.roomTypeId} className="grid grid-cols-12 gap-4 items-center border p-4 rounded-lg">
+                                                <div className="col-span-12 md:col-span-4">
+                                                    <h4 className="font-semibold">{room.name}</h4>
+                                                    <div className="text-sm text-muted-foreground flex gap-2 items-center">
+                                                        <span>Net: ${room.basePrice}</span>
+                                                        <span className="text-xs bg-green-100 text-green-700 px-1.5 rounded">{room.availableQuantity} available</span>
+                                                    </div>
+                                                </div>
+                                                <div className="col-span-6 md:col-span-3">
+                                                    <Label className="text-xs">Quantity to Lock</Label>
+                                                    <Input
+                                                        type="number"
+                                                        min="0"
+                                                        max={room.availableQuantity}
+                                                        className="h-8"
+                                                        placeholder="0"
+                                                        onChange={(e) => handleInventoryChange(room.roomTypeId, "quantity", e.target.value, room.basePrice, room.name)}
+                                                    />
+                                                </div>
+                                                <div className="col-span-6 md:col-span-3">
+                                                    <Label className="text-xs">Markup ($)</Label>
+                                                    <Input
+                                                        type="number"
+                                                        min="0"
+                                                        className="h-8"
+                                                        placeholder="0"
+                                                        onChange={(e) => handleInventoryChange(room.roomTypeId, "markup", e.target.value, room.basePrice, room.name)}
+                                                    />
+                                                </div>
+                                                <div className="col-span-12 md:col-span-2 text-right">
+                                                    <div className="text-xs text-muted-foreground">Guest Price</div>
+                                                    <div className="font-bold text-lg text-primary">
+                                                        ${((inventory[room.roomTypeId]?.markup || 0) + room.basePrice)}
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                    ))}
-                                </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         ) : (
                             <div className="text-center py-10 text-muted-foreground">Please select a hotel first.</div>
@@ -236,9 +327,9 @@ export default function CreateEventWizard() {
                         </p>
 
                         <div className="flex items-center justify-center gap-4 pt-4">
-                            <Button variant="outline" className="gap-2">
-                                <Link href={`/events/${formData.eventSlug}`} target="_blank">View Microsite</Link> <ArrowRight className="h-4 w-4" />
-                            </Button>
+                            <Link href={`/events/${formData.eventSlug}`} target="_blank" className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 gap-2">
+                                View Microsite <ArrowRight className="h-4 w-4" />
+                            </Link>
                             <Button className="gap-2 bg-green-600 hover:bg-green-700 text-white">
                                 <svg viewBox="0 0 24 24" className="h-5 w-5 fill-current" xmlns="http://www.w3.org/2000/svg"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z" /></svg>
                                 Share on WhatsApp
@@ -257,28 +348,64 @@ export default function CreateEventWizard() {
                             Back
                         </Button>
                         {step < 4 ? (
-                            <Button onClick={handleNext} disabled={step === 2 && !selectedHotel}>
+                            <Button onClick={handleNext} disabled={(step === 2 && !selectedHotel) || (step === 1 && !formData.eventName)}>
                                 Next Step <ChevronRight className="ml-2 h-4 w-4" />
                             </Button>
                         ) : (
                             <form action={async () => {
+                                if (!selectedHotel) {
+                                    alert("Please select a hotel first")
+                                    return
+                                }
+
                                 const data = new FormData()
                                 data.append('name', formData.eventName)
                                 data.append('slug', formData.eventSlug)
                                 data.append('startDate', formData.startDate)
                                 data.append('endDate', formData.endDate)
+
                                 data.append('hotelId', selectedHotel.id)
                                 data.append('hotelName', selectedHotel.name)
 
                                 // Format inventory for server
-                                const inventoryList = Object.keys(inventory).map(key => ({
-                                    id: key,
-                                    ...inventory[key]
-                                }))
-                                data.append('inventory', JSON.stringify(inventoryList))
+                                const inventoryList = Object.keys(inventory)
+                                    .map(key => {
+                                        const item = inventory[key]
+                                        return {
+                                            id: key,
+                                            roomTypeId: key,
+                                            name: item.name, // Ensure this persists from handleInventoryChange
+                                            price: Number(item.cost), // Base cost
+                                            markup: Number(item.markup),
+                                            quantity: Number(item.quantity)
+                                        }
+                                    })
+                                    .filter(item => item.quantity > 0) // Only send rooms with allocation
 
-                                await createEvent(data) // Server Action
-                                setStep(5)
+                                if (inventoryList.length === 0) {
+                                    alert("Please allocate at least one room (quantity > 0).")
+                                    return
+                                }
+
+                                // Adapting to existing createEvent schema
+                                const adaptedInventory = inventoryList.map(item => ({
+                                    // Required by Prisma schema
+                                    hotelId: selectedHotel.id,
+                                    hotelName: selectedHotel.name,
+
+                                    roomTypeId: item.id,
+                                    roomTypeName: item.name,
+
+                                    totalAllocated: item.quantity,
+                                    price: item.price + item.markup // Final price
+                                }))
+
+                                const result = await createEvent(data) // Server Action
+                                if (result?.success) {
+                                    setStep(5)
+                                } else {
+                                    alert(result?.error || "Something went wrong creating the event.")
+                                }
                             }}>
                                 <Button size="lg" className="px-8 bg-primary hover:bg-primary/90" type="submit">
                                     Publish Microsite 🚀

@@ -18,6 +18,14 @@ export async function createEvent(formData: FormData) {
     // For MVP simplification, we're assuming inventory is passed as a JSON string
     const inventoryData = JSON.parse(formData.get('inventory') as string || '[]')
 
+    if (startDate > endDate) {
+        return { error: "Start date cannot be after end date" }
+    }
+
+    if (inventoryData.length === 0) {
+        return { error: "Cannot create event without inventory. Please select at least one room." }
+    }
+
     // Mock Admin ID (in a real app, this comes from session)
     // Ensure we have at least one admin
     let admin = await prisma.admin.findFirst()
@@ -44,17 +52,17 @@ export async function createEvent(formData: FormData) {
                 create: inventoryData.map((item: any) => ({
                     hotelId,
                     hotelName,
-                    roomTypeId: item.id,
-                    roomTypeName: item.name,
-                    totalAllocated: Number(item.quantity),
-                    price: Number(item.cost) + Number(item.markup)
+                    roomTypeId: item.roomTypeId || item.id,
+                    roomTypeName: item.roomTypeName || item.name,
+                    totalAllocated: Number(item.totalAllocated) || Number(item.quantity),
+                    price: Number(item.price) // Final price from frontend
                 }))
             }
         }
     })
 
     revalidatePath('/admin')
-    redirect(`/admin`)
+    return { success: true, event }
 }
 
 export async function getEvents() {
@@ -69,12 +77,18 @@ export async function getEvents() {
 }
 
 export async function getEventBySlug(slug: string) {
-    return await prisma.event.findUnique({
+    const event = await prisma.event.findUnique({
         where: { slug },
         include: {
             inventory: true
         }
     })
+    console.log(`[getEventBySlug] Fetched event: ${slug}, Found: ${!!event}`)
+    if (event) {
+        console.log(`[getEventBySlug] Inventory count: ${event.inventory.length}`)
+        console.log(`[getEventBySlug] Inventory items:`, JSON.stringify(event.inventory, null, 2))
+    }
+    return event
 }
 
 export async function createBooking(prevState: any, formData: FormData) {
